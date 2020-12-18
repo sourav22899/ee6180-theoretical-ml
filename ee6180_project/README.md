@@ -1,6 +1,6 @@
 ## An Empirical Study on Online Agnostic Boosting via Regret Minimization
 
-This repo contains the code for the final project of EE6180 Advanced Topics in Artificial Intelliegence (Theoretical Machine Learning). In this project, we conduct an empirical study on the theoretical results of [Online Agnostic Boosting via Regret Minimization](https://papers.nips.cc/paper/2020/hash/07168af6cb0ef9f78dae15739dd73255-Abstract.html). Daataset 1 can be downloaded from [here](https://archive.ics.uci.edu/ml/datasets/optical+recognition+of+handwritten+digits) and Dataset 2 can be downloaded from [here](https://archive.ics.uci.edu/ml/datasets/isolet).
+This repo contains the code for the final project of EE6180 Advanced Topics in Artificial Intelliegence (Theoretical Machine Learning). In this project, we conduct an empirical study on the theoretical results of [Online Agnostic Boosting via Regret Minimization](https://papers.nips.cc/paper/2020/hash/07168af6cb0ef9f78dae15739dd73255-Abstract.html). Dataset 1 can be downloaded from [here](https://archive.ics.uci.edu/ml/datasets/optical+recognition+of+handwritten+digits) and Dataset 2 can be downloaded from [here](https://archive.ics.uci.edu/ml/datasets/isolet).
 
 Create a directory `data` in the current directory and create two subdirectories in it namely `ocr` and `isolet`. Keep the datasets in the respective folders. To run the code for Dataset 1:
 ```
