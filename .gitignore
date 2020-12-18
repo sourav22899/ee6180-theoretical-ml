@@ -1,2 +1,4 @@
 ./ee6180_project/data/ocr/*
 ./ee6180_project/data/isolet/*
+./ee6180_project/.idea/*
+./ee6180_project/.vscode/*
