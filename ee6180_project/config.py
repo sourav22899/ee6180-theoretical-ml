@@ -14,10 +14,11 @@ def base_config():
     n_steps = 100  # for OCO
     n_iterations_gamma = 100
     D = 2
-    K = 50
+    K = 20
     n_wl = 100
     estimate_gamma_bool = False
     best_expt_bool = True
+    expt_type = 2
 
 
 def ocr_config():
@@ -34,9 +35,18 @@ def isolet_config():
     test_data = Path('isolet5.data')
     n_iterations_gamma = 10
     n_wl = 617
+    expt_type = 3
 
 
-named_configs = [ocr_config, isolet_config]
+def test_config():
+    expt_name = Path('ocr')
+    train_data = Path('optdigits.tra')
+    test_data = Path('optdigits.tes')
+    n_wl = 64
+    K = 1
+
+
+named_configs = [ocr_config, isolet_config, test_config]
 
 
 def initialise(ex):

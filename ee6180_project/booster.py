@@ -2,9 +2,10 @@ import numpy as np
 import random
 from tqdm import tqdm
 
+
 class OnlineBooster():
     """
-    weak_learners: A dictionary of N weak learners.
+    weak_learners: A dictionary of dictionary of N weak learners.
     T: time horizon
     gamma: AWOL parameter, in our case, it is set as 0.02
     oco: online convex optimizer (we use OGD)
@@ -21,7 +22,7 @@ class OnlineBooster():
 
     def weak_learners_initialize(self):
         for algo in self.weak_learners:
-            self.weak_learners[algo].initialize()
+            self.weak_learners[algo]['algo'].initialize()
 
     def randomized_project(self, x):
         if np.abs(x) >= 1:
@@ -40,10 +41,9 @@ class OnlineBooster():
 
     def booster_predict(self, x):
         preds = []
-        # assert x.shape[0] == self.N
         for i in range(self.N):
-            x_tilda = x[i] if self.best_wl == -1 else x[self.best_wl]
-            p = self.weak_learners[i].predict(x_tilda)
+            x_tilda = x[self.weak_learners[i]['idx']]
+            p = self.weak_learners[i]['algo'].predict(x_tilda)
             p = np.sign(p - 0.5)  # To make predictions in {-1,+1}.
             preds.append(p)
 
@@ -61,12 +61,12 @@ class OnlineBooster():
             else:
                 p_ti = self.oco.step(p_ti, l_ti)  # Not sure here
 
-            x_tilda = x[i] if self.best_wl == -1 else x[self.best_wl]
-            W_xt = np.sign(self.weak_learners[i].predict(x_tilda) - 0.5)  # To make W(x_t) in {-1,+1}
+            x_tilda = x[self.weak_learners[i]['idx']]
+            W_xt = np.sign(self.weak_learners[i]['algo'].predict(x_tilda) - 0.5)  # To make W(x_t) in {-1,+1}
             l_ti = lambda t: t * (((W_xt * y) / self.gamma) - 1)  # Not sure here also
             self.grads.append(np.abs(l_ti(1)))  # To compute G = max |grad(f(x))|
             y_random = self.randomized_label(y, p_ti)
-            self.weak_learners[i].play(x_tilda, y_random)
+            self.weak_learners[i]['algo'].play(x_tilda, y_random)
 
     def run(self, X, y):
         yhat_list = []
@@ -76,6 +76,5 @@ class OnlineBooster():
             yhat = self.booster_predict(xt)
             yhat_list.append(yhat)
             self.update(xt, yt)
-            # print(self.weak_learners[10].weights)
 
         return np.asarray(yhat_list)

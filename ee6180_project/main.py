@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+import random
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -18,11 +19,12 @@ from booster import OnlineBooster
 ex = Experiment()
 ex = initialise(ex)
 
+
 def estimate_gamma(X, y, T, n_expts, wl, n_iterations):
     n, d = X.shape
     wl_cor, h_cor, gammas = [], [], []
     theoretical_regret = np.sqrt(2 * T * np.log(n_expts))
-    final_weights = np.zeros((d, n_expts))  # a 64*17 dim matrix to store the final weights of 64 weak learners
+    final_weights = np.zeros((d, n_expts))  # a 64*17 dim matrix to store the final weights of 64 weak learners (D1)
     for wl_no in tqdm(range(d)):  # choose the dimension along which you require the weak learner
         assert X.max() <= 1
         assert X.min() >= 0
@@ -50,17 +52,40 @@ def estimate_gamma(X, y, T, n_expts, wl, n_iterations):
     return final_weights, gammas
 
 
-def load_weights(final_weights, n_expts=17, eta=None, best_expt=-1, n_wl=100):
-    weak_learners = dict()
-    if best_expt == -1:
-        n_wl = final_weights.shape[0]
-        for i in range(n_wl):  # change back to final_weights.shape[0] for warm starts
-            weak_learners[i] = Hedge(n_expts=n_expts, weights=final_weights[i], eta=eta)
+def construct_weak_learner_dict(final_weights, gammas=None, expt_type=0, n_wl=100):
+    d = gammas.shape[0]
+    dist = np.zeros_like(gammas)
+    if expt_type == 0:
+        dist[gammas.argmax()] = 1
+    elif expt_type == 1:
+        dist[gammas.argmin()] = 1
+    elif expt_type == 2:
+        dist = gammas / gammas.sum()
     else:
-        for i in range(n_wl):  # change back to final_weights.shape[0] for warm starts
-            weak_learners[i] = Hedge(n_expts=n_expts, weights=final_weights[best_expt], eta=eta)
+        dist = None
+
+    np.random.seed(40667)
+    choose_wl = np.random.choice(d, size=n_wl, p=dist)
+    if expt_type == 3:
+        assert n_wl == d
+        choose_wl = np.arange(d)
+    gamma_temp = gammas[choose_wl]
+    weak_learners_weights = dict()
+    for i, idx in enumerate(choose_wl):
+        weak_learners_weights[i] = {'wt': final_weights[idx], 'idx': idx}
+
+    gamma = gamma_temp.min()
+    return weak_learners_weights, gamma
+
+
+def load_weights(weak_learners_weights, n_expts=17, eta=None):
+    weak_learners = dict()
+    for i in range(len(weak_learners_weights)):
+        weak_learners[i] = {'algo': Hedge(n_expts=n_expts, weights=weak_learners_weights[i]['wt'], eta=eta),
+                            'idx': weak_learners_weights[i]['idx']}
 
     return weak_learners
+
 
 @ex.automain
 def main(_run):
@@ -82,10 +107,10 @@ def main(_run):
     yhat = clf.predict(X)
     print('correlation:', get_cor(y, yhat, normalize=True))
 
-    # Plan : For OCR dataset, we will have 64 online weak learners corresponding to each coordinate of X. These weak learners are
-    # Hedge algorithms. Each instance of Hedge has access to 17 experts corresponding to the fact that each
-    # coordinate of X can take 17 values (0-16). Now, we will observe an data point (x,y) and we are interested to
-    # choose a threshold above which the weak learner would predict x.
+    # Plan : For OCR dataset, we will have 64 online weak learners corresponding to each coordinate of X. These weak
+    # learners are Hedge algorithms. Each instance of Hedge has access to 17 experts corresponding to the fact that
+    # each coordinate of X can take 17 values (0-16). Now, we will observe an data point (x,y) and we are interested
+    # to choose a threshold above which the weak learner would predict x.
 
     # Estimating gamma
 
@@ -115,12 +140,9 @@ def main(_run):
     final_weights = np.load(load_path_final_weights)
 
     import pdb; pdb.set_trace()
-    if params.best_expt_bool:
-        best_expt = gammas.argmax()
-        gamma = gammas[best_expt]
-    else:
-        best_expt = -1
-        gamma = gammas.min()
+    weak_learners_weights, gamma = construct_weak_learner_dict(final_weights=final_weights,
+                                                               expt_type=params.expt_type,
+                                                               gammas=gammas, n_wl=params.n_wl)
 
     n, d = X.shape
     results = np.zeros((params.K, 5))
@@ -132,9 +154,10 @@ def main(_run):
 
         # Keep multiple instance of best weak learner instead of keeping one wrt each dim else best_expt = -1
         oco = OnlineConvexOptimizer(gamma=gamma)
-        weak_learners = load_weights(final_weights, n_expts=params.n_expts, eta=eta, best_expt=best_expt, n_wl=params.n_wl)
+        # weak_learners is a dict of dict
+        weak_learners = load_weights(weak_learners_weights=weak_learners_weights, n_expts=17, eta=eta)
         oco.initialize()
-        booster = OnlineBooster(weak_learners=weak_learners, oco=oco, gamma=gamma, T=params.T, best_wl=best_expt)
+        booster = OnlineBooster2(weak_learners=weak_learners, oco=oco, gamma=gamma, T=params.T, best_wl=None)
         yhat_list = booster.run(X_sampled, y_sampled)
 
         clf = LogisticRegression(random_state=0, fit_intercept=True).fit(X_sampled, y_sampled)
@@ -146,10 +169,10 @@ def main(_run):
         results[k, 1] = pred_cor
         results[k, 2] = max(booster.grads)
         G = min(2. / gamma, max(booster.grads))
-        t2 = (1.5 * G * np.sqrt(booster.N)) / booster.N
+        t2 = (1.5 * G * params.D * np.sqrt(booster.N)) / booster.N
         results[k, 3] = t1
         results[k, 4] = t2
-        print(h_star_cor, pred_cor, max(booster.grads))
+        print(h_star_cor, pred_cor, t1, t2, h_star_cor - pred_cor, t1 + t2)
 
     expected_regret = results[:, 0] - results[:, 1]
     regret_avg = np.mean(expected_regret)
@@ -159,104 +182,9 @@ def main(_run):
     upper_bound_avg = np.mean(expected_upper_bound)
     upper_bound_std_dev = np.std(expected_upper_bound)
 
+    print(regret_avg, regret_std_dev, upper_bound_avg)
+    import pdb;pdb.set_trace()
     save_path_results = params.log_root / params.expt_name / 'results'
     np.save(save_path_results, results)
     import pdb;
     pdb.set_trace()
-
-# ## **New dataset: ISOLET**
-
-# import numpy as np
-# import pandas as pd
-# from sklearn.linear_model import LogisticRegression
-
-# data_tes = pd.read_csv('/content/drive/MyDrive/ee6180_project/isolet1+2+3+4.data', header=None)
-# data_tra = pd.read_csv('/content/drive/MyDrive/ee6180_project/isolet5.data', header=None)
-# data = pd.concat([data_tra, data_tes])
-# data = data.sample(frac=1)
-# data.head()
-
-
-# data_sample = data.sample(frac = 1)
-# X, y = data_sample.to_numpy()[:,:-1], data_sample.to_numpy()[:,-1]
-# print(X.shape, y.shape)
-
-
-# X = normalize(X)
-# y = y % 2
-
-
-# clf = LogisticRegression(random_state=0 ,fit_intercept=True).fit(X, y) 
-# yhat = clf.predict(X)
-# get_cor(y, yhat, normalize=True)
-
-
-# n_expts = 17
-# T = 7500
-# eta = np.sqrt(np.log(n_expts)/T)
-
-
-# wl = Hedge(n_expts=n_expts, weights=None, eta=eta)
-# wl.initialize()
-# wl.weights
-
-
-# n_iterations = 10
-# final_weights, gammas = estimate_gamma(X = X, y = y, T = T, n_expts = n_expts, wl = wl, n_iterations = n_iterations)
-# gammas = np.asarray(gammas)
-# np.save('/content/drive/MyDrive/ee6180_project/final_weights_isolet', final_weights)
-# np.save('/content/drive/MyDrive/ee6180_project/gammas_isolet', gammas)
-# print(gammas.max(), gammas.min(), gammas.mean())
-
-
-# gammas = np.load('/content/drive/MyDrive/ee6180_project/gammas_isolet.npy')
-# final_weights = np.load('/content/drive/MyDrive/ee6180_project/final_weights_isolet.npy')
-
-
-# gamma = gammas.max()
-# best_expt = gammas.argmax()
-# best_expt
-
-# gamma
-
-# n, d = X.shape
-# d
-
-# K = 4
-# n_wl = d # using 617 instances of weak learners
-# results = np.zeros((K, 2))
-# for k in range(K):
-#   start = np.random.choice(n - T - 1)
-#   X_sampled, y_sampled = X[start:start + T], y[start:start + T]
-#   # Keep multiple instance of best weak learner instead of keeping one wrt each dim else best_expt = -1
-#   oco = OnlineConvexOptimizer(gamma = gamma)
-#   weak_learners = load_weights(final_weights, best_expt=best_expt, n_wl = n_wl) 
-#   oco.initialize()
-#   booster = OnlineBooster(weak_learners = weak_learners, oco = oco, gamma = gamma, T = T, best_wl=best_expt)
-#   yhat_list = booster.run(X_sampled, y_sampled)
-
-#   clf = LogisticRegression(random_state=0 ,fit_intercept=True).fit(X_sampled, y_sampled)
-#   yhat_lr = clf.predict(X_sampled)
-#   h_star_cor = get_cor(y_sampled, yhat_lr, normalize=True)
-#   y_temp = np.sign(y_sampled - 0.5)
-#   pred_cor = get_cor(y_temp, yhat_list, zeros=False, normalize=True)
-#   results[k, 0] = h_star_cor
-#   results[k, 1] = pred_cor
-#   print(h_star_cor, pred_cor)
-
-
-# G = 2./gamma
-# D = 2
-# N = X.shape[1] # change back to X.shape[1]
-
-
-# G = min(G, max(booster.grads))
-
-
-# t1 = (theoretical_regret)/(gamma * T)
-# t2 = (1.5 * G * np.sqrt(N))/N
-# t1 + t2
-
-# t1
-
-# t2
